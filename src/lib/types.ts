@@ -1,3 +1,5 @@
+export const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
+
 export type VaultRole = "owner" | "manager" | "editor" | "viewer";
 
 export type ItemType = "login" | "note" | "credit_card" | "identity" | "alias" | "ssh_key" | "wifi";

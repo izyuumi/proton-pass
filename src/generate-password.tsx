@@ -3,8 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { generatePassword, passwordScore } from "./lib/pass-cli";
 import { Preferences, PasswordScore, PassCliError, PassCliErrorType } from "./lib/types";
 import { getPasswordStrengthLabel, getPasswordStrengthIcon, maskPassword } from "./lib/utils";
-
-const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
+import { renderErrorView } from "./lib/error-views";
 
 export default function Command() {
   const preferences = getPreferenceValues<Preferences>();
@@ -48,109 +47,8 @@ export default function Command() {
     generate();
   }, [generate]);
 
-  if (error === "not_installed") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.XMarkCircle}
-          title="Proton Pass CLI Not Installed"
-          description="You need to install the Proton Pass CLI to use this extension. Click below to learn how to install it."
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="Open Installation Guide" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "not_authenticated") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Lock}
-          title="Not Logged In"
-          description="You need to login to Proton Pass to generate passwords. Use the 'Login to Proton Pass' command first."
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="View CLI Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "keyring_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Key}
-          title="Keyring Access Failed"
-          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "network_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Wifi}
-          title="Network Error"
-          description="Check your internet connection and try again"
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "timeout") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Clock}
-          title="Request Timed Out"
-          description="pass-cli took too long to respond. Please try again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error) {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.ExclamationMark}
-          title="Failed to Generate Password"
-          description="An error occurred while generating your password"
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
+  const errorView = renderErrorView(error, () => generate(), "Generate Password");
+  if (errorView) return errorView;
 
   async function copyPassword() {
     await Clipboard.copy(password, { transient: preferences.copyPasswordTransient ?? true });

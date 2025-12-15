@@ -4,8 +4,7 @@ import { listItems, getTotp, checkAuth } from "./lib/pass-cli";
 import { Item, PassCliError, PassCliErrorType } from "./lib/types";
 import { getItemIcon, getTotpRemainingSeconds, formatTotpCode } from "./lib/utils";
 import { getCachedItems, setCachedItems } from "./lib/cache";
-
-const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
+import { renderErrorView } from "./lib/error-views";
 
 interface TotpItem extends Item {
   currentTotp?: string;
@@ -128,109 +127,8 @@ export default function Command() {
     }
   }
 
-  if (error === "not_installed") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.XMarkCircle}
-          title="Proton Pass CLI Not Installed"
-          description="You need to install the Proton Pass CLI to use this extension."
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="Open Installation Guide" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "not_authenticated") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Lock}
-          title="Not Logged In"
-          description="Run 'pass-cli login' in terminal to authenticate"
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="View Login Instructions" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "keyring_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Key}
-          title="Keyring Access Failed"
-          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "network_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Wifi}
-          title="Network Error"
-          description="Check your internet connection and try again"
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error === "timeout") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Clock}
-          title="Request Timed Out"
-          description="pass-cli took too long to respond. Please try again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error) {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.ExclamationMark}
-          title="Failed to Load TOTP Items"
-          description="An error occurred while loading your TOTP items"
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
+  const errorView = renderErrorView(error, loadTotpItems, "Load TOTP Items");
+  if (errorView) return errorView;
 
   async function copyTotp(totp: string, title: string) {
     await Clipboard.copy(totp);

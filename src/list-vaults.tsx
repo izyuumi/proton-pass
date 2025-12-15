@@ -1,19 +1,10 @@
-import { List, ActionPanel, Action, Icon, showToast, Toast, Color, getPreferenceValues } from "@raycast/api";
+import { List, ActionPanel, Action, Icon, showToast, Toast, Color } from "@raycast/api";
 import { useState, useEffect, useRef } from "react";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { listVaults, listItems, checkAuth } from "./lib/pass-cli";
-import { Vault, Item, PassCliError, VaultRole, Preferences } from "./lib/types";
+import { Vault, Item, PassCliError, VaultRole, PROTON_PASS_CLI_DOCS } from "./lib/types";
 import { getItemIcon } from "./lib/utils";
 import { getCachedVaults, setCachedVaults, getCachedItems, setCachedItems } from "./lib/cache";
-
-const execFileAsync = promisify(execFile);
-
-function escapeAppleScriptString(str: string): string {
-  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
+import { openTerminalForLogin } from "./lib/terminal";
 
 function VaultItems({ vault }: { vault: Vault }) {
   const [items, setItems] = useState<Item[]>([]);
@@ -202,51 +193,7 @@ export default function Command() {
           description="You need to login via terminal to use Proton Pass. Click below to open Terminal and run the login command."
           actions={
             <ActionPanel>
-              <Action
-                title="Open Terminal to Login"
-                icon={Icon.Terminal}
-                onAction={async () => {
-                  const preferences = getPreferenceValues<Preferences>();
-                  const cliPath = preferences.cliPath || "pass-cli";
-                  if (process.platform === "win32") {
-                    try {
-                      await execFileAsync("cmd", ["/c", "start", "cmd", "/k", cliPath, "login"]);
-                      await showToast({
-                        style: Toast.Style.Success,
-                        title: "Terminal opened",
-                        message: "Please complete login in Command Prompt",
-                      });
-                    } catch (err: unknown) {
-                      const message = err instanceof Error ? err.message : "Unknown error";
-                      await showToast({
-                        style: Toast.Style.Failure,
-                        title: "Failed to open Terminal",
-                        message,
-                      });
-                    }
-                  } else {
-                    const escapedCliPath = escapeAppleScriptString(cliPath);
-                    try {
-                      await execFileAsync("osascript", [
-                        "-e",
-                        `tell application "Terminal" to do script "${escapedCliPath} login"`,
-                      ]);
-                      await showToast({
-                        style: Toast.Style.Success,
-                        title: "Terminal opened",
-                        message: "Please complete login in Terminal",
-                      });
-                    } catch (err: unknown) {
-                      const message = err instanceof Error ? err.message : "Unknown error";
-                      await showToast({
-                        style: Toast.Style.Failure,
-                        title: "Failed to open Terminal",
-                        message,
-                      });
-                    }
-                  }
-                }}
-              />
+              <Action title="Open Terminal to Login" icon={Icon.Terminal} onAction={openTerminalForLogin} />
               <Action.OpenInBrowser
                 title="View CLI Documentation"
                 url={PROTON_PASS_CLI_DOCS}

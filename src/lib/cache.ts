@@ -14,12 +14,12 @@ function isCacheValid<T>(cached: CachedData<T>): boolean {
   return Date.now() - cached.timestamp < CACHE_TTL_MS;
 }
 
-export async function getCachedItems(): Promise<Item[] | null> {
+async function getCache<T>(key: string): Promise<T | null> {
   try {
-    const raw = await LocalStorage.getItem<string>(ITEMS_CACHE_KEY);
+    const raw = await LocalStorage.getItem<string>(key);
     if (!raw) return null;
 
-    const cached: CachedData<Item[]> = JSON.parse(raw);
+    const cached: CachedData<T> = JSON.parse(raw);
     if (!isCacheValid(cached)) return null;
 
     return cached.data;
@@ -28,29 +28,16 @@ export async function getCachedItems(): Promise<Item[] | null> {
   }
 }
 
-export async function setCachedItems(items: Item[]): Promise<void> {
-  const cached: CachedData<Item[]> = { data: items, timestamp: Date.now() };
-  await LocalStorage.setItem(ITEMS_CACHE_KEY, JSON.stringify(cached));
+async function setCache<T>(key: string, data: T): Promise<void> {
+  const cached: CachedData<T> = { data, timestamp: Date.now() };
+  await LocalStorage.setItem(key, JSON.stringify(cached));
 }
 
-export async function getCachedVaults(): Promise<Vault[] | null> {
-  try {
-    const raw = await LocalStorage.getItem<string>(VAULTS_CACHE_KEY);
-    if (!raw) return null;
+export const getCachedItems = () => getCache<Item[]>(ITEMS_CACHE_KEY);
+export const setCachedItems = (items: Item[]) => setCache(ITEMS_CACHE_KEY, items);
 
-    const cached: CachedData<Vault[]> = JSON.parse(raw);
-    if (!isCacheValid(cached)) return null;
-
-    return cached.data;
-  } catch {
-    return null;
-  }
-}
-
-export async function setCachedVaults(vaults: Vault[]): Promise<void> {
-  const cached: CachedData<Vault[]> = { data: vaults, timestamp: Date.now() };
-  await LocalStorage.setItem(VAULTS_CACHE_KEY, JSON.stringify(cached));
-}
+export const getCachedVaults = () => getCache<Vault[]>(VAULTS_CACHE_KEY);
+export const setCachedVaults = (vaults: Vault[]) => setCache(VAULTS_CACHE_KEY, vaults);
 
 export async function clearCache(): Promise<void> {
   await Promise.all([LocalStorage.removeItem(ITEMS_CACHE_KEY), LocalStorage.removeItem(VAULTS_CACHE_KEY)]);

@@ -14,8 +14,7 @@ import { listItems, listVaults, getItem, getItemRaw, getTotp, checkAuth } from "
 import { Item, ItemDetail as ItemDetailType, Preferences, PassCliError, PassCliErrorType, Vault } from "./lib/types";
 import { getItemIcon, formatItemSubtitle, maskPassword, formatTotpCode } from "./lib/utils";
 import { getCachedItems, setCachedItems, getCachedVaults, setCachedVaults } from "./lib/cache";
-
-const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
+import { renderErrorView } from "./lib/error-views";
 
 function ItemDetail({ item }: { item: Item }) {
   const [detail, setDetail] = useState<ItemDetailType | null>(null);
@@ -302,109 +301,8 @@ export default function Command() {
     }
   }
 
-  if (error?.type === "not_installed") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.XMarkCircle}
-          title="Proton Pass CLI Not Installed"
-          description="Install pass-cli to use this extension"
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="Installation Guide" url={PROTON_PASS_CLI_DOCS} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error?.type === "not_authenticated") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Lock}
-          title="Not Logged In"
-          description="Run 'pass-cli login' in terminal to authenticate"
-          actions={
-            <ActionPanel>
-              <Action.OpenInBrowser title="View Login Instructions" url={PROTON_PASS_CLI_DOCS} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error?.type === "keyring_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Key}
-          title="Keyring Access Failed"
-          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error?.type === "network_error") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Wifi}
-          title="Network Error"
-          description="Check your internet connection and try again"
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error?.type === "timeout") {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.Clock}
-          title="Request Timed Out"
-          description="pass-cli took too long to respond. Please try again."
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
-
-  if (error) {
-    return (
-      <List>
-        <List.EmptyView
-          icon={Icon.ExclamationMark}
-          title="Failed to Load Items"
-          description={error.message || "An unknown error occurred"}
-          actions={
-            <ActionPanel>
-              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
-              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} />
-            </ActionPanel>
-          }
-        />
-      </List>
-    );
-  }
+  const errorView = renderErrorView(error?.type ?? null, loadItems, "Load Items");
+  if (errorView) return errorView;
 
   const filteredItems =
     selectedVaultId === ALL_VAULTS_VALUE ? items : items.filter((item) => item.shareId === selectedVaultId);

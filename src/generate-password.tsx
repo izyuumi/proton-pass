@@ -1,7 +1,7 @@
 import { List, ActionPanel, Action, Icon, showToast, Toast, Clipboard, getPreferenceValues } from "@raycast/api";
 import { useState, useEffect, useCallback } from "react";
 import { generatePassword, passwordScore } from "./lib/pass-cli";
-import { Preferences, PasswordScore, PassCliError } from "./lib/types";
+import { Preferences, PasswordScore, PassCliError, PassCliErrorType } from "./lib/types";
 import { getPasswordStrengthLabel, getPasswordStrengthIcon, maskPassword } from "./lib/utils";
 
 const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
@@ -12,7 +12,7 @@ export default function Command() {
   const [score, setScore] = useState<PasswordScore | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PassCliErrorType | null>(null);
 
   const generate = useCallback(
     async (type?: "random" | "passphrase") => {
@@ -31,13 +31,11 @@ export default function Command() {
         const newScore = await passwordScore(newPassword);
         setScore(newScore);
         setError(null);
-      } catch (e: any) {
-        if (e instanceof PassCliError && e.type === "not_installed") {
-          setError("not_installed");
-        } else if (e instanceof PassCliError && e.type === "not_authenticated") {
-          setError("not_authenticated");
+      } catch (e: unknown) {
+        if (e instanceof PassCliError) {
+          setError(e.type);
         } else {
-          showToast({ style: Toast.Style.Failure, title: "Failed", message: e.message });
+          setError("unknown");
         }
       } finally {
         setIsLoading(false);
@@ -50,7 +48,6 @@ export default function Command() {
     generate();
   }, [generate]);
 
-  // Handle not_installed error with EmptyView
   if (error === "not_installed") {
     return (
       <List>
@@ -68,7 +65,6 @@ export default function Command() {
     );
   }
 
-  // Handle not_authenticated error with EmptyView
   if (error === "not_authenticated") {
     return (
       <List>
@@ -79,6 +75,76 @@ export default function Command() {
           actions={
             <ActionPanel>
               <Action.OpenInBrowser title="View CLI Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error === "keyring_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Key}
+          title="Keyring Access Failed"
+          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error === "network_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Wifi}
+          title="Network Error"
+          description="Check your internet connection and try again"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error === "timeout") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Clock}
+          title="Request Timed Out"
+          description="pass-cli took too long to respond. Please try again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error) {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.ExclamationMark}
+          title="Failed to Generate Password"
+          description="An error occurred while generating your password"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={() => generate()} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
             </ActionPanel>
           }
         />

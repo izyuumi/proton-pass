@@ -1,8 +1,9 @@
 import { List, ActionPanel, Action, Icon, showToast, Toast, Clipboard, Color } from "@raycast/api";
 import { useState, useEffect, useRef } from "react";
 import { listItems, getTotp, checkAuth } from "./lib/pass-cli";
-import { Item, PassCliError } from "./lib/types";
+import { Item, PassCliError, PassCliErrorType } from "./lib/types";
 import { getItemIcon, getTotpRemainingSeconds, formatTotpCode } from "./lib/utils";
+import { getCachedItems, setCachedItems } from "./lib/cache";
 
 const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
 
@@ -15,8 +16,8 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(getTotpRemainingSeconds());
-  const [error, setError] = useState<string | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout>();
+  const [error, setError] = useState<PassCliErrorType | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const itemsRef = useRef<TotpItem[]>([]);
 
   useEffect(() => {
@@ -39,6 +40,35 @@ export default function Command() {
   }, []);
 
   async function loadTotpItems() {
+    setError(null);
+
+    const cachedItems = await getCachedItems();
+    if (cachedItems) {
+      const cachedTotpItems = cachedItems.filter((item) => item.hasTotp);
+      if (cachedTotpItems.length > 0) {
+        const itemsWithPlaceholder = cachedTotpItems.map((item) => ({
+          ...item,
+          currentTotp: undefined,
+        }));
+        setItems(itemsWithPlaceholder);
+        itemsRef.current = itemsWithPlaceholder;
+        setIsLoading(false);
+
+        const itemsWithTotp = await Promise.all(
+          cachedTotpItems.map(async (item) => {
+            try {
+              const totp = await getTotp(item.shareId, item.itemId);
+              return { ...item, currentTotp: totp };
+            } catch {
+              return { ...item, currentTotp: undefined };
+            }
+          }),
+        );
+        setItems(itemsWithTotp);
+        itemsRef.current = itemsWithTotp;
+      }
+    }
+
     try {
       const isAuth = await checkAuth();
       if (!isAuth) {
@@ -47,10 +77,10 @@ export default function Command() {
         return;
       }
 
-      const allItems = await listItems();
-      const totpItems = allItems.filter(item => item.hasTotp);
+      const freshItems = await listItems();
+      await setCachedItems(freshItems);
 
-      // Fetch TOTP codes for all items
+      const totpItems = freshItems.filter((item) => item.hasTotp);
       const itemsWithTotp = await Promise.all(
         totpItems.map(async (item) => {
           try {
@@ -59,18 +89,18 @@ export default function Command() {
           } catch {
             return { ...item, currentTotp: undefined };
           }
-        })
+        }),
       );
 
       setItems(itemsWithTotp);
       itemsRef.current = itemsWithTotp;
-    } catch (e: any) {
-      if (e instanceof PassCliError && e.type === "not_installed") {
-        setError("not_installed");
-      } else if (e instanceof PassCliError && e.type === "not_authenticated") {
-        setError("not_authenticated");
-      } else {
-        showToast({ style: Toast.Style.Failure, title: "Failed", message: e.message });
+    } catch (e: unknown) {
+      if (!cachedItems) {
+        if (e instanceof PassCliError) {
+          setError(e.type);
+        } else {
+          setError("unknown");
+        }
       }
     } finally {
       setIsLoading(false);
@@ -89,7 +119,7 @@ export default function Command() {
           } catch {
             return item;
           }
-        })
+        }),
       );
       setItems(updatedItems);
       itemsRef.current = updatedItems;
@@ -98,7 +128,6 @@ export default function Command() {
     }
   }
 
-  // Handle error states with EmptyView
   if (error === "not_installed") {
     return (
       <List>
@@ -133,6 +162,76 @@ export default function Command() {
     );
   }
 
+  if (error === "keyring_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Key}
+          title="Keyring Access Failed"
+          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error === "network_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Wifi}
+          title="Network Error"
+          description="Check your internet connection and try again"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error === "timeout") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Clock}
+          title="Request Timed Out"
+          description="pass-cli took too long to respond. Please try again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error) {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.ExclamationMark}
+          title="Failed to Load TOTP Items"
+          description="An error occurred while loading your TOTP items"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadTotpItems} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
   async function copyTotp(totp: string, title: string) {
     await Clipboard.copy(totp);
     showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: `${title}: ${totp}` });
@@ -158,10 +257,10 @@ export default function Command() {
               {
                 tag: {
                   value: item.currentTotp ? formatTotpCode(item.currentTotp) : "---",
-                  color: getTimerColor()
-                }
+                  color: getTimerColor(),
+                },
               },
-              { text: `${remainingSeconds}s`, icon: Icon.Clock }
+              { text: `${remainingSeconds}s`, icon: Icon.Clock },
             ]}
             actions={
               <ActionPanel>
@@ -184,11 +283,7 @@ export default function Command() {
         ))}
       </List.Section>
       {items.length === 0 && !isLoading && !error && (
-        <List.EmptyView
-          icon={Icon.Clock}
-          title="No TOTP Items"
-          description="None of your items have TOTP configured"
-        />
+        <List.EmptyView icon={Icon.Clock} title="No TOTP Items" description="None of your items have TOTP configured" />
       )}
     </List>
   );

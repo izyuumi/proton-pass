@@ -1,10 +1,11 @@
 import { List, ActionPanel, Action, Icon, showToast, Toast, Color, getPreferenceValues } from "@raycast/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { listVaults, listItems, checkAuth } from "./lib/pass-cli";
 import { Vault, Item, PassCliError, VaultRole, Preferences } from "./lib/types";
 import { getItemIcon } from "./lib/utils";
+import { getCachedVaults, setCachedVaults, getCachedItems, setCachedItems } from "./lib/cache";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,22 +18,36 @@ const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
 function VaultItems({ vault }: { vault: Vault }) {
   const [items, setItems] = useState<Item[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const hasLoadedFromCache = useRef(false);
 
   useEffect(() => {
     loadVaultItems();
   }, []);
 
   async function loadVaultItems() {
+    const cachedItems = await getCachedItems();
+    if (cachedItems && !hasLoadedFromCache.current) {
+      const filtered = cachedItems.filter((item) => item.shareId === vault.shareId);
+      if (filtered.length > 0) {
+        setItems(filtered);
+        setIsLoading(false);
+        hasLoadedFromCache.current = true;
+      }
+    }
+
     try {
-      const allItems = await listItems(vault.shareId);
-      setItems(allItems);
-    } catch (error: any) {
-      const message = error instanceof PassCliError ? error.message : (error.message || "An unknown error occurred");
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to load items",
-        message,
-      });
+      const freshItems = await listItems(vault.shareId);
+      setItems(freshItems);
+      await setCachedItems(freshItems);
+    } catch (error: unknown) {
+      if (!hasLoadedFromCache.current) {
+        const message = error instanceof Error ? error.message : "An unknown error occurred";
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "Failed to load items",
+          message,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -53,10 +68,9 @@ function VaultItems({ vault }: { vault: Vault }) {
             icon={getItemIcon(item.type)}
             title={item.title}
             subtitle={item.username || item.email}
-            accessories={[
-              item.hasTotp ? { icon: Icon.Clock, tooltip: "Has TOTP" } : {},
-              { text: item.type },
-            ].filter((acc) => Object.keys(acc).length > 0)}
+            accessories={[item.hasTotp ? { icon: Icon.Clock, tooltip: "Has TOTP" } : {}, { text: item.type }].filter(
+              (acc) => Object.keys(acc).length > 0,
+            )}
             actions={
               <ActionPanel>
                 <Action.CopyToClipboard
@@ -91,12 +105,22 @@ export default function Command() {
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<PassCliError | null>(null);
+  const hasLoadedFromCache = useRef(false);
 
   useEffect(() => {
     loadVaults();
   }, []);
 
   async function loadVaults() {
+    setError(null);
+
+    const cachedVaults = await getCachedVaults();
+    if (cachedVaults && !hasLoadedFromCache.current) {
+      setVaults(cachedVaults);
+      setIsLoading(false);
+      hasLoadedFromCache.current = true;
+    }
+
     try {
       const isAuth = await checkAuth();
       if (!isAuth) {
@@ -105,13 +129,17 @@ export default function Command() {
         return;
       }
 
-      const allVaults = await listVaults();
-      setVaults(allVaults);
-    } catch (err: any) {
-      if (err instanceof PassCliError) {
-        setError(err);
-      } else {
-        setError(new PassCliError(err.message || "An unknown error occurred", "unknown"));
+      const freshVaults = await listVaults();
+      setVaults(freshVaults);
+      await setCachedVaults(freshVaults);
+    } catch (err: unknown) {
+      if (!hasLoadedFromCache.current) {
+        if (err instanceof PassCliError) {
+          setError(err);
+        } else {
+          const message = err instanceof Error ? err.message : "An unknown error occurred";
+          setError(new PassCliError(message, "unknown"));
+        }
       }
     } finally {
       setIsLoading(false);
@@ -157,11 +185,7 @@ export default function Command() {
           description="You need to install the Proton Pass CLI to use this extension. Click below to learn how to install it."
           actions={
             <ActionPanel>
-              <Action.OpenInBrowser
-                title="Open Installation Guide"
-                url={PROTON_PASS_CLI_DOCS}
-                icon={Icon.Globe}
-              />
+              <Action.OpenInBrowser title="Open Installation Guide" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
             </ActionPanel>
           }
         />
@@ -184,20 +208,42 @@ export default function Command() {
                 onAction={async () => {
                   const preferences = getPreferenceValues<Preferences>();
                   const cliPath = preferences.cliPath || "pass-cli";
-                  const escapedCliPath = escapeAppleScriptString(cliPath);
-                  try {
-                    await execFileAsync("osascript", ["-e", `tell application "Terminal" to do script "${escapedCliPath} login"`]);
-                    await showToast({
-                      style: Toast.Style.Success,
-                      title: "Terminal opened",
-                      message: "Please complete login in Terminal",
-                    });
-                  } catch (error: any) {
-                    await showToast({
-                      style: Toast.Style.Failure,
-                      title: "Failed to open Terminal",
-                      message: error.message,
-                    });
+                  if (process.platform === "win32") {
+                    try {
+                      await execFileAsync("cmd", ["/c", "start", "cmd", "/k", cliPath, "login"]);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Terminal opened",
+                        message: "Please complete login in Command Prompt",
+                      });
+                    } catch (err: unknown) {
+                      const message = err instanceof Error ? err.message : "Unknown error";
+                      await showToast({
+                        style: Toast.Style.Failure,
+                        title: "Failed to open Terminal",
+                        message,
+                      });
+                    }
+                  } else {
+                    const escapedCliPath = escapeAppleScriptString(cliPath);
+                    try {
+                      await execFileAsync("osascript", [
+                        "-e",
+                        `tell application "Terminal" to do script "${escapedCliPath} login"`,
+                      ]);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Terminal opened",
+                        message: "Please complete login in Terminal",
+                      });
+                    } catch (err: unknown) {
+                      const message = err instanceof Error ? err.message : "Unknown error";
+                      await showToast({
+                        style: Toast.Style.Failure,
+                        title: "Failed to open Terminal",
+                        message,
+                      });
+                    }
                   }
                 }}
               />
@@ -207,6 +253,58 @@ export default function Command() {
                 icon={Icon.Globe}
                 shortcut={{ modifiers: ["cmd"], key: "d" }}
               />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error?.type === "keyring_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Key}
+          title="Keyring Access Failed"
+          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadVaults} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error?.type === "network_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Wifi}
+          title="Network Error"
+          description="Check your internet connection and try again"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadVaults} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error?.type === "timeout") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Clock}
+          title="Request Timed Out"
+          description="pass-cli took too long to respond. Please try again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadVaults} />
             </ActionPanel>
           }
         />
@@ -224,6 +322,7 @@ export default function Command() {
           actions={
             <ActionPanel>
               <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadVaults} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} icon={Icon.Globe} />
             </ActionPanel>
           }
         />

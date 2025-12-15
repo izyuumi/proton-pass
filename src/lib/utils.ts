@@ -10,7 +10,7 @@ export function getItemIcon(type: ItemType): Icon {
     case "credit_card":
       return Icon.CreditCard;
     case "identity":
-      return Icon.AddressBook;
+      return Icon.PersonLines;
     case "alias":
       return Icon.AtSymbol;
     case "ssh_key":

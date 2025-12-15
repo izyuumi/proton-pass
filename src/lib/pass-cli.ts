@@ -32,17 +32,6 @@ function stripSurroundingQuotes(value: string): string {
   return trimmed;
 }
 
-function toBoolean(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value !== 0;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
-  }
-  return undefined;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -52,32 +41,6 @@ function truncateMiddle(value: string, maxLen: number): string {
   const head = Math.max(0, Math.floor((maxLen - 1) / 2));
   const tail = Math.max(0, maxLen - head - 1);
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
-}
-
-function normalizeItemType(value: unknown): ItemType {
-  const raw = trimOrUndefined(value)?.toLowerCase();
-  switch (raw) {
-    case "login":
-      return "login";
-    case "note":
-      return "note";
-    case "credit_card":
-    case "credit-card":
-    case "credit card":
-      return "credit_card";
-    case "identity":
-      return "identity";
-    case "alias":
-      return "alias";
-    case "ssh_key":
-    case "ssh-key":
-    case "ssh key":
-      return "ssh_key";
-    case "wifi":
-      return "wifi";
-    default:
-      return "note";
-  }
 }
 
 function normalizeVaultRole(value: unknown): VaultRole {
@@ -167,8 +130,9 @@ async function execPassCli(
   try {
     const { stdout, stderr } = await execFileAsync(cliPath, args, baseOptions);
     return { stdout: stdout ?? "", stderr: stderr ?? "" };
-  } catch (err: any) {
-    const isEnoent = err?.code === "ENOENT" || err?.errno === -2;
+  } catch (err: unknown) {
+    const execErr = err as NodeJS.ErrnoException;
+    const isEnoent = execErr?.code === "ENOENT" || execErr?.errno === -2;
     if (process.platform === "win32" && isEnoent && !cliPath.toLowerCase().endsWith(".exe")) {
       const { stdout, stderr } = await execFileAsync(`${cliPath}.exe`, args, baseOptions);
       return { stdout: stdout ?? "", stderr: stderr ?? "" };
@@ -184,15 +148,16 @@ async function runCli(args: string[]): Promise<string> {
   try {
     const { stdout } = await execPassCli(cliPath, args, env);
     return (stdout ?? "").trim();
-  } catch (error: any) {
-    if (error?.killed && typeof error?.signal === "string") {
+  } catch (error: unknown) {
+    const execErr = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: string };
+    if (execErr?.killed && typeof execErr?.signal === "string") {
       throw new PassCliError("pass-cli timed out. Please try again.", "timeout");
     }
 
-    const message = typeof error?.message === "string" ? error.message : "";
-    const stderr = typeof error?.stderr === "string" ? error.stderr : "";
+    const message = error instanceof Error ? error.message : "";
+    const stderr = typeof execErr?.stderr === "string" ? execErr.stderr : "";
 
-    const isEnoent = error?.code === "ENOENT" || error?.errno === -2;
+    const isEnoent = execErr?.code === "ENOENT" || execErr?.errno === -2;
     if (isEnoent) {
       throw new PassCliError(
         `pass-cli not found at '${cliPath}'. Install it or set the correct path in extension preferences.`,
@@ -261,7 +226,10 @@ function normalizeVault(raw: unknown): Vault {
   };
 }
 
-function getItemTypeFromContent(contentData: unknown): { type: ItemType; loginData: Record<string, unknown> | undefined } {
+function getItemTypeFromContent(contentData: unknown): {
+  type: ItemType;
+  loginData: Record<string, unknown> | undefined;
+} {
   if (!isRecord(contentData)) {
     return { type: "note", loginData: undefined };
   }

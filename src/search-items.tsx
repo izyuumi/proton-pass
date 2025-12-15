@@ -1,8 +1,19 @@
-import { List, ActionPanel, Action, Icon, showToast, Toast, Clipboard, getPreferenceValues, Detail } from "@raycast/api";
-import { useState, useEffect } from "react";
-import { listItems, getItem, getItemRaw, getTotp, checkAuth } from "./lib/pass-cli";
-import { Item, ItemDetail as ItemDetailType, Preferences, PassCliError } from "./lib/types";
+import {
+  List,
+  ActionPanel,
+  Action,
+  Icon,
+  showToast,
+  Toast,
+  Clipboard,
+  getPreferenceValues,
+  Detail,
+} from "@raycast/api";
+import { useState, useEffect, useRef } from "react";
+import { listItems, listVaults, getItem, getItemRaw, getTotp, checkAuth } from "./lib/pass-cli";
+import { Item, ItemDetail as ItemDetailType, Preferences, PassCliError, PassCliErrorType, Vault } from "./lib/types";
 import { getItemIcon, formatItemSubtitle, maskPassword, formatTotpCode } from "./lib/utils";
+import { getCachedItems, setCachedItems, getCachedVaults, setCachedVaults } from "./lib/cache";
 
 const PROTON_PASS_CLI_DOCS = "https://protonpass.github.io/pass-cli/";
 
@@ -19,11 +30,12 @@ function ItemDetail({ item }: { item: Item }) {
     try {
       const itemDetail = await getItem(item.shareId, item.itemId);
       setDetail(itemDetail);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "An unknown error occurred";
       showToast({
         style: Toast.Style.Failure,
         title: "Failed to load item details",
-        message: error.message,
+        message,
       });
     } finally {
       setIsLoading(false);
@@ -138,8 +150,9 @@ function ItemDetail({ item }: { item: Item }) {
                     const totp = await getTotp(detail.shareId, detail.itemId);
                     await Clipboard.copy(totp);
                     showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: formatTotpCode(totp) });
-                  } catch (error: any) {
-                    showToast({ style: Toast.Style.Failure, title: "Failed to get TOTP", message: error.message });
+                  } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : "An unknown error occurred";
+                    showToast({ style: Toast.Style.Failure, title: "Failed to get TOTP", message });
                   }
                 }}
               />
@@ -159,7 +172,14 @@ function ItemDetail({ item }: { item: Item }) {
                   key={index}
                   title={`Copy ${field.name}`}
                   content={field.value}
-                  shortcut={index < 9 ? { modifiers: ["cmd", "shift"], key: (index + 1).toString() as any } : undefined}
+                  shortcut={
+                    index < 9
+                      ? {
+                          modifiers: ["cmd", "shift"],
+                          key: String(index + 1) as "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9",
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </ActionPanel.Section>
@@ -186,7 +206,7 @@ function ItemDetail({ item }: { item: Item }) {
                   customFieldsCount: detail.customFields?.length ?? 0,
                 },
                 null,
-                2
+                2,
               )}
               shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
             />
@@ -198,9 +218,14 @@ function ItemDetail({ item }: { item: Item }) {
                 try {
                   const raw = await getItemRaw(detail.shareId, detail.itemId);
                   await Clipboard.copy(raw);
-                  showToast({ style: Toast.Style.Success, title: "Raw JSON Copied", message: "Paste to see actual CLI output" });
-                } catch (error: any) {
-                  showToast({ style: Toast.Style.Failure, title: "Failed", message: error.message });
+                  showToast({
+                    style: Toast.Style.Success,
+                    title: "Raw JSON Copied",
+                    message: "Paste to see actual CLI output",
+                  });
+                } catch (error: unknown) {
+                  const message = error instanceof Error ? error.message : "An unknown error occurred";
+                  showToast({ style: Toast.Style.Failure, title: "Failed", message });
                 }
               }}
             />
@@ -211,11 +236,29 @@ function ItemDetail({ item }: { item: Item }) {
   );
 }
 
+const ALL_VAULTS_VALUE = "all";
+
+function VaultDropdown({ vaults, onVaultChange }: { vaults: Vault[]; onVaultChange: (vaultId: string) => void }) {
+  return (
+    <List.Dropdown tooltip="Select Vault" storeValue={true} onChange={onVaultChange} defaultValue={ALL_VAULTS_VALUE}>
+      <List.Dropdown.Item title="All Vaults" value={ALL_VAULTS_VALUE} icon={Icon.Globe} />
+      <List.Dropdown.Section title="Vaults">
+        {vaults.map((vault) => (
+          <List.Dropdown.Item key={vault.shareId} title={vault.name} value={vault.shareId} icon={Icon.Folder} />
+        ))}
+      </List.Dropdown.Section>
+    </List.Dropdown>
+  );
+}
+
 export default function Command() {
   const [items, setItems] = useState<Item[]>([]);
+  const [vaults, setVaults] = useState<Vault[]>([]);
+  const [selectedVaultId, setSelectedVaultId] = useState<string>(ALL_VAULTS_VALUE);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<{ type: string; message?: string } | null>(null);
+  const [error, setError] = useState<{ type: PassCliErrorType; message?: string } | null>(null);
   const preferences = getPreferenceValues<Preferences>();
+  const hasLoadedFromCache = useRef(false);
 
   useEffect(() => {
     loadItems();
@@ -223,7 +266,15 @@ export default function Command() {
 
   async function loadItems() {
     setError(null);
-    setIsLoading(true);
+
+    const [cachedItems, cachedVaults] = await Promise.all([getCachedItems(), getCachedVaults()]);
+    if (cachedItems && cachedVaults && !hasLoadedFromCache.current) {
+      setItems(cachedItems);
+      setVaults(cachedVaults);
+      setIsLoading(false);
+      hasLoadedFromCache.current = true;
+    }
+
     try {
       const isAuth = await checkAuth();
       if (!isAuth) {
@@ -232,19 +283,19 @@ export default function Command() {
         return;
       }
 
-      const allItems = await listItems();
-      setItems(allItems);
-    } catch (error: any) {
-      if (error instanceof PassCliError) {
-        if (error.type === "not_installed") {
-          setError({ type: "not_installed" });
-        } else if (error.type === "not_authenticated") {
-          setError({ type: "not_authenticated" });
+      const [freshItems, freshVaults] = await Promise.all([listItems(), listVaults()]);
+      setItems(freshItems);
+      setVaults(freshVaults);
+
+      await Promise.all([setCachedItems(freshItems), setCachedVaults(freshVaults)]);
+    } catch (err: unknown) {
+      if (!hasLoadedFromCache.current) {
+        if (err instanceof PassCliError) {
+          setError({ type: err.type, message: err.message });
         } else {
-          setError({ type: "generic", message: error.message });
+          const message = err instanceof Error ? err.message : "An unknown error occurred";
+          setError({ type: "unknown", message });
         }
-      } else {
-        setError({ type: "generic", message: error.message || "An unknown error occurred" });
       }
     } finally {
       setIsLoading(false);
@@ -255,7 +306,7 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          icon={Icon.ExclamationMark}
+          icon={Icon.XMarkCircle}
           title="Proton Pass CLI Not Installed"
           description="Install pass-cli to use this extension"
           actions={
@@ -285,7 +336,59 @@ export default function Command() {
     );
   }
 
-  if (error?.type === "generic") {
+  if (error?.type === "keyring_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Key}
+          title="Keyring Access Failed"
+          description="pass-cli could not access secure key storage. Try: pass-cli logout --force, then set PROTON_PASS_KEY_PROVIDER=fs and login again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
+              <Action.OpenInBrowser title="View Documentation" url={PROTON_PASS_CLI_DOCS} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error?.type === "network_error") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Wifi}
+          title="Network Error"
+          description="Check your internet connection and try again"
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error?.type === "timeout") {
+    return (
+      <List>
+        <List.EmptyView
+          icon={Icon.Clock}
+          title="Request Timed Out"
+          description="pass-cli took too long to respond. Please try again."
+          actions={
+            <ActionPanel>
+              <Action title="Retry" icon={Icon.ArrowClockwise} onAction={loadItems} />
+            </ActionPanel>
+          }
+        />
+      </List>
+    );
+  }
+
+  if (error) {
     return (
       <List>
         <List.EmptyView
@@ -303,12 +406,24 @@ export default function Command() {
     );
   }
 
+  const filteredItems =
+    selectedVaultId === ALL_VAULTS_VALUE ? items : items.filter((item) => item.shareId === selectedVaultId);
+
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Search items..." filtering={true}>
-      {items.length === 0 && !isLoading ? (
-        <List.EmptyView icon={Icon.MagnifyingGlass} title="No Items Found" description="Your vaults are empty" />
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Search items..."
+      filtering={true}
+      searchBarAccessory={<VaultDropdown vaults={vaults} onVaultChange={setSelectedVaultId} />}
+    >
+      {filteredItems.length === 0 && !isLoading ? (
+        <List.EmptyView
+          icon={Icon.MagnifyingGlass}
+          title="No Items Found"
+          description={selectedVaultId === ALL_VAULTS_VALUE ? "Your vaults are empty" : "No items in this vault"}
+        />
       ) : (
-        items.map((item) => (
+        filteredItems.map((item) => (
           <List.Item
             key={`${item.shareId}-${item.itemId}`}
             icon={getItemIcon(item.type)}
@@ -341,8 +456,13 @@ export default function Command() {
                               message: `Item type: ${detail.type}. Check if pass-cli item view returns password field.`,
                             });
                           }
-                        } catch (error: any) {
-                          showToast({ style: Toast.Style.Failure, title: "Failed to copy password", message: error.message });
+                        } catch (error: unknown) {
+                          const message = error instanceof Error ? error.message : "An unknown error occurred";
+                          showToast({
+                            style: Toast.Style.Failure,
+                            title: "Failed to copy password",
+                            message,
+                          });
                         }
                       }}
                     />
@@ -370,9 +490,18 @@ export default function Command() {
                         try {
                           const totp = await getTotp(item.shareId, item.itemId);
                           await Clipboard.copy(totp);
-                          showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: formatTotpCode(totp) });
-                        } catch (error: any) {
-                          showToast({ style: Toast.Style.Failure, title: "Failed to get TOTP", message: error.message });
+                          showToast({
+                            style: Toast.Style.Success,
+                            title: "TOTP Copied",
+                            message: formatTotpCode(totp),
+                          });
+                        } catch (error: unknown) {
+                          const message = error instanceof Error ? error.message : "An unknown error occurred";
+                          showToast({
+                            style: Toast.Style.Failure,
+                            title: "Failed to get TOTP",
+                            message,
+                          });
                         }
                       }}
                     />

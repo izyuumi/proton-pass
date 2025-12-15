@@ -1,4 +1,5 @@
 import { List, ActionPanel, Action, Icon } from "@raycast/api";
+import { JSX } from "react";
 import { PassCliErrorType, PROTON_PASS_CLI_DOCS } from "./types";
 
 interface ErrorViewProps {

@@ -1,4 +1,4 @@
-import { getPreferenceValues } from "@raycast/api";
+import { getPreferenceValues, environment } from "@raycast/api";
 import { execFile } from "child_process";
 import { homedir } from "os";
 import { delimiter } from "path";
@@ -15,6 +15,22 @@ import {
   Vault,
   VaultRole,
 } from "./types";
+import { MOCK_VAULTS, MOCK_ITEMS, MOCK_ITEM_DETAILS, MOCK_TOTP_CODES } from "./mock-data";
+import { clearCache } from "./cache";
+
+let mockCacheCleared = false;
+
+const USE_MOCK_DATA = false;
+
+function useMockData(): boolean {
+  return environment.isDevelopment && USE_MOCK_DATA;
+}
+
+async function ensureMockCacheCleared(): Promise<void> {
+  if (mockCacheCleared) return;
+  mockCacheCleared = true;
+  await clearCache();
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -372,6 +388,11 @@ function normalizeItemDetail(raw: unknown): ItemDetail {
 }
 
 export async function checkAuth(): Promise<boolean> {
+  if (useMockData()) {
+    await ensureMockCacheCleared();
+    return true;
+  }
+
   try {
     await runCli(["test"]);
     return true;
@@ -384,6 +405,11 @@ export async function checkAuth(): Promise<boolean> {
 }
 
 export async function listVaults(): Promise<Vault[]> {
+  if (useMockData()) {
+    await ensureMockCacheCleared();
+    return MOCK_VAULTS;
+  }
+
   const output = await runCli(["vault", "list", "--output", "json"]);
   const data = parseJson<unknown>(output, "vault list");
 
@@ -416,6 +442,14 @@ async function listItemsFromVault(shareId: string, vaultName: string): Promise<I
 }
 
 export async function listItems(shareId?: string): Promise<Item[]> {
+  if (useMockData()) {
+    await ensureMockCacheCleared();
+    if (shareId) {
+      return MOCK_ITEMS.filter((item) => item.shareId === shareId);
+    }
+    return MOCK_ITEMS;
+  }
+
   if (shareId) {
     const vaults = await listVaults();
     const vault = vaults.find((v) => v.shareId === shareId);
@@ -457,6 +491,14 @@ function unwrapItemResponse(data: unknown): unknown {
 }
 
 export async function getItem(shareId: string, itemId: string): Promise<ItemDetail> {
+  if (useMockData()) {
+    const mockDetail = MOCK_ITEM_DETAILS[itemId];
+    if (mockDetail) return mockDetail;
+    const mockItem = MOCK_ITEMS.find((i) => i.itemId === itemId && i.shareId === shareId);
+    if (mockItem) return { ...mockItem, password: "mock-password-123" };
+    throw new PassCliError("Item not found", "invalid_output");
+  }
+
   const output = await runCli(["item", "view", "--share-id", shareId, "--item-id", itemId, "--output", "json"]);
   const data = parseJson<unknown>(output, "item view");
 
@@ -485,6 +527,12 @@ export async function getTotpCodes(shareId: string, itemId: string): Promise<Rec
 }
 
 export async function getTotp(shareId: string, itemId: string): Promise<string> {
+  if (useMockData()) {
+    const mockCode = MOCK_TOTP_CODES[itemId];
+    if (mockCode) return mockCode;
+    throw new PassCliError("No TOTP fields found for this item.", "invalid_output");
+  }
+
   const codes = await getTotpCodes(shareId, itemId);
   const preferred = codes.totp;
   if (preferred) return preferred;

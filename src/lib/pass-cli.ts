@@ -234,7 +234,6 @@ function getItemTypeFromContent(contentData: unknown): {
     return { type: "note", loginData: undefined };
   }
 
-  // Check for each item type key
   if (isRecord(contentData.Login)) {
     return { type: "login", loginData: contentData.Login as Record<string, unknown> };
   }
@@ -265,27 +264,21 @@ function normalizeItem(raw: unknown, vaultNameOverride?: string): Item {
     throw new PassCliError("Unexpected item data from pass-cli.", "invalid_output");
   }
 
-  // Extract IDs - actual CLI uses 'id' and 'share_id'
   const shareId = trimOrUndefined(raw.share_id ?? raw.shareId ?? raw.shareID ?? raw.vaultShareId ?? raw.vault_share_id);
   const itemId = trimOrUndefined(raw.id ?? raw.itemId ?? raw.item_id ?? raw.itemID);
 
-  // Content is nested: raw.content contains title, note, and another content object
   const outerContent = isRecord(raw.content) ? raw.content : raw;
   const title = trimOrUndefined(outerContent.title ?? raw.title ?? raw.name);
 
-  // The inner content.content contains the type-specific data (Login, Note, etc.)
   const innerContent = isRecord(outerContent.content) ? outerContent.content : undefined;
   const { type, loginData } = getItemTypeFromContent(innerContent);
 
-  // Extract login-specific fields
   const username = loginData ? trimOrUndefined(loginData.username) : trimOrUndefined(raw.username);
   const email = loginData ? trimOrUndefined(loginData.email) : trimOrUndefined(raw.email);
 
-  // Check for TOTP - it's in totp_uri field, non-empty means has TOTP
   const totpUri = loginData ? trimOrUndefined(loginData.totp_uri ?? loginData.totpUri) : undefined;
   const hasTotp = totpUri !== undefined && totpUri.length > 0;
 
-  // Vault name - may need to be provided externally since CLI output doesn't include it
   const vaultName = vaultNameOverride ?? trimOrUndefined(raw.vaultName ?? raw.vault_name) ?? "Unknown Vault";
 
   if (!shareId || !itemId || !title) {
@@ -332,13 +325,11 @@ function normalizeStringArray(raw: unknown): string[] | undefined {
 }
 
 function getTypeSpecificData(raw: Record<string, unknown>): Record<string, unknown> | undefined {
-  // Navigate to content.content which contains the type-specific data
   const outerContent = isRecord(raw.content) ? raw.content : raw;
   const innerContent = isRecord(outerContent.content) ? outerContent.content : undefined;
 
   if (!innerContent) return undefined;
 
-  // Return the first type-specific object found
   const typeKeys = ["Login", "Note", "CreditCard", "credit_card", "Identity", "Alias", "SshKey", "ssh_key", "Wifi"];
   for (const key of typeKeys) {
     if (isRecord(innerContent[key])) {
@@ -356,20 +347,15 @@ function normalizeItemDetail(raw: unknown): ItemDetail {
 
   const base = normalizeItem(raw);
 
-  // Get the outer content and type-specific data
   const outerContent = isRecord(raw.content) ? raw.content : raw;
   const typeData = getTypeSpecificData(raw);
 
-  // Extract password from type-specific data (Login.password)
   const password = typeData ? trimOrUndefined(typeData.password) : undefined;
 
-  // Extract URLs from type-specific data (Login.urls)
   const urls = typeData ? normalizeStringArray(typeData.urls) : undefined;
 
-  // Extract note from outer content (content.note)
   const note = trimOrUndefined(outerContent.note ?? raw.note);
 
-  // Extract custom fields from outer content (content.extra_fields)
   const customFields =
     normalizeCustomFields(outerContent.extra_fields) ??
     normalizeCustomFields(outerContent.extraFields) ??
@@ -420,7 +406,6 @@ async function listItemsFromVault(shareId: string, vaultName: string): Promise<I
     throw new PassCliError("Unexpected item list output from pass-cli.", "invalid_output");
   }
 
-  // Filter out trashed items and pass vault name to normalizeItem
   return itemsRaw
     .filter((item) => {
       if (!isRecord(item)) return false;
@@ -431,15 +416,12 @@ async function listItemsFromVault(shareId: string, vaultName: string): Promise<I
 }
 
 export async function listItems(shareId?: string): Promise<Item[]> {
-  // If shareId is provided, list items from that vault only
   if (shareId) {
-    // We don't know the vault name, so we'll need to look it up or use a placeholder
     const vaults = await listVaults();
     const vault = vaults.find((v) => v.shareId === shareId);
     return listItemsFromVault(shareId, vault?.name ?? "Unknown Vault");
   }
 
-  // If no shareId, iterate through all vaults and collect all items
   const vaults = await listVaults();
   const allItems: Item[] = [];
 
@@ -448,7 +430,6 @@ export async function listItems(shareId?: string): Promise<Item[]> {
       const items = await listItemsFromVault(vault.shareId, vault.name);
       allItems.push(...items);
     } catch (error) {
-      // Log but continue with other vaults if one fails
       console.error(`Failed to list items from vault ${vault.name}:`, error);
     }
   }
@@ -459,11 +440,9 @@ export async function listItems(shareId?: string): Promise<Item[]> {
 function unwrapItemResponse(data: unknown): unknown {
   if (!isRecord(data)) return data;
 
-  // Try various wrapper patterns commonly used in API responses
   const wrapperKeys = ["item", "data", "result", "response", "payload"];
   for (const key of wrapperKeys) {
     if (isRecord(data[key])) {
-      // Check for double wrapping like { data: { item: { ... } } }
       const inner = data[key] as Record<string, unknown>;
       for (const innerKey of wrapperKeys) {
         if (isRecord(inner[innerKey])) {

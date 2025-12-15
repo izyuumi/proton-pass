@@ -22,12 +22,10 @@ export default function Command() {
   useEffect(() => {
     loadTotpItems();
 
-    // Update countdown every second
     intervalRef.current = setInterval(() => {
       const newRemaining = getTotpRemainingSeconds();
       setRemainingSeconds(newRemaining);
 
-      // Refresh TOTP codes when timer resets
       if (newRemaining === 30) {
         refreshTotpCodes();
       }
@@ -135,7 +133,6 @@ export default function Command() {
     showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: `${title}: ${totp}` });
   }
 
-  // Color based on remaining time (green > 10s, yellow > 5s, red <= 5s)
   function getTimerColor(): Color {
     if (remainingSeconds > 10) return Color.Green;
     if (remainingSeconds > 5) return Color.Yellow;

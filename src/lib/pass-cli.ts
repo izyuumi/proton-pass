@@ -76,7 +76,14 @@ function getEnhancedPath(): string {
   const home = homedir();
   const currentPath = process.env.PATH || "";
 
-  const additionalPaths = ["/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/bin`, "/usr/bin", "/bin"];
+  const additionalPaths = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    `${home}/.local/bin`,
+    `${home}/bin`,
+    "/usr/bin",
+    "/bin",
+  ];
 
   return [...additionalPaths, currentPath].filter((p) => p.length > 0).join(delimiter);
 }

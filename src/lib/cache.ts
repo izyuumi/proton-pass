@@ -44,5 +44,9 @@ export const getCachedVaults = () => getCache<Vault[]>(VAULTS_CACHE_KEY);
 export const setCachedVaults = (vaults: Vault[]) => setCache(VAULTS_CACHE_KEY, vaults);
 
 export async function clearCache(): Promise<void> {
-  await Promise.all([LocalStorage.removeItem(ITEMS_CACHE_KEY), LocalStorage.removeItem(VAULTS_CACHE_KEY)]);
+  const allItems = await LocalStorage.allItems();
+  const keysToRemove = Object.keys(allItems).filter(
+    (key) => key === ITEMS_CACHE_KEY || key === VAULTS_CACHE_KEY || key.startsWith(`${ITEMS_CACHE_KEY}_`),
+  );
+  await Promise.all(keysToRemove.map((key) => LocalStorage.removeItem(key)));
 }

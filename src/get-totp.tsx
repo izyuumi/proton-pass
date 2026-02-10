@@ -18,15 +18,18 @@ export default function Command() {
   const [error, setError] = useState<PassCliErrorType | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const itemsRef = useRef<TotpItem[]>([]);
+  const lastTimestepRef = useRef(Math.floor(Date.now() / 1000 / 30));
 
   useEffect(() => {
     loadTotpItems();
 
     intervalRef.current = setInterval(() => {
-      const newRemaining = getTotpRemainingSeconds();
-      setRemainingSeconds(newRemaining);
+      const now = Math.floor(Date.now() / 1000);
+      const currentTimestep = Math.floor(now / 30);
+      setRemainingSeconds(30 - (now % 30));
 
-      if (newRemaining === 30) {
+      if (currentTimestep !== lastTimestepRef.current) {
+        lastTimestepRef.current = currentTimestep;
         refreshTotpCodes();
       }
     }, 1000);

@@ -1,4 +1,4 @@
-import { List, ActionPanel, Action, Icon, showToast, Toast, Clipboard, Color } from "@raycast/api";
+import { List, ActionPanel, Action, Icon, showToast, Toast, Clipboard, Color, getPreferenceValues } from "@raycast/api";
 import { useState, useEffect, useRef } from "react";
 import { listItems, getTotp, checkAuth } from "./lib/pass-cli";
 import { Item, PassCliError, PassCliErrorType } from "./lib/types";
@@ -10,7 +10,12 @@ interface TotpItem extends Item {
   currentTotp?: string;
 }
 
+function getTotpTimeStep(): number {
+  return Math.floor(Date.now() / 30_000);
+}
+
 export default function Command() {
+  const preferences = getPreferenceValues();
   const [items, setItems] = useState<TotpItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -18,7 +23,8 @@ export default function Command() {
   const [error, setError] = useState<PassCliErrorType | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const itemsRef = useRef<TotpItem[]>([]);
-  const lastTimestepRef = useRef(Math.floor(Date.now() / 1000 / 30));
+  const currentTimeStepRef = useRef<number>(getTotpTimeStep());
+  const isRefreshingRef = useRef(false);
 
   useEffect(() => {
     loadTotpItems();
@@ -28,8 +34,9 @@ export default function Command() {
       const currentTimestep = Math.floor(now / 30);
       setRemainingSeconds(30 - (now % 30));
 
-      if (currentTimestep !== lastTimestepRef.current) {
-        lastTimestepRef.current = currentTimestep;
+      const nextTimeStep = getTotpTimeStep();
+      if (nextTimeStep !== currentTimeStepRef.current) {
+        currentTimeStepRef.current = nextTimeStep;
         refreshTotpCodes();
       }
     }, 1000);
@@ -108,6 +115,9 @@ export default function Command() {
   }
 
   async function refreshTotpCodes() {
+    if (isRefreshingRef.current) return;
+
+    isRefreshingRef.current = true;
     setIsRefreshing(true);
     try {
       const currentItems = itemsRef.current;
@@ -124,6 +134,7 @@ export default function Command() {
       setItems(updatedItems);
       itemsRef.current = updatedItems;
     } finally {
+      isRefreshingRef.current = false;
       setIsRefreshing(false);
     }
   }
@@ -132,8 +143,8 @@ export default function Command() {
   if (errorView) return errorView;
 
   async function copyTotp(totp: string, title: string) {
-    await Clipboard.copy(totp);
-    showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: `${title}: ${totp}` });
+    await Clipboard.copy(totp, { transient: preferences.copyPasswordTransient ?? true });
+    showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: title });
   }
 
   function getTimerColor(): Color {

@@ -31,7 +31,6 @@ export default function Command() {
 
     intervalRef.current = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
-      const currentTimestep = Math.floor(now / 30);
       setRemainingSeconds(30 - (now % 30));
 
       const nextTimeStep = getTotpTimeStep();

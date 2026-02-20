@@ -20,10 +20,11 @@ import { ensureCli } from "./cli";
 
 let mockCacheCleared = false;
 
-const USE_MOCK_DATA = false;
+// Seed the extension with local demo data while running `ray develop` / `npm run dev`.
+const USE_MOCK_DATA = environment.isDevelopment;
 
 function useMockData(): boolean {
-  return environment.isDevelopment && USE_MOCK_DATA;
+  return USE_MOCK_DATA;
 }
 
 async function ensureMockCacheCleared(): Promise<void> {

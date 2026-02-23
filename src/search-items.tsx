@@ -215,23 +215,29 @@ function ItemDetail({ item }: { item: Item }) {
             </ActionPanel.Section>
           )}
           <ActionPanel.Section title="Debug">
-            <Action.CopyToClipboard
+            <Action
               title="Copy Item Debug Info"
-              content={JSON.stringify(
-                {
-                  type: detail.type,
-                  hasPassword: !!detail.password,
-                  hasUsername: !!detail.username,
-                  hasEmail: !!detail.email,
-                  hasUrls: !!detail.urls?.length,
-                  hasNote: !!detail.note,
-                  hasTotp: detail.hasTotp,
-                  customFieldsCount: detail.customFields?.length ?? 0,
-                },
-                null,
-                2,
-              )}
+              icon={Icon.Bug}
               shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
+              onAction={async () => {
+                await Clipboard.copy(
+                  JSON.stringify(
+                    {
+                      type: detail.type,
+                      hasPassword: !!detail.password,
+                      hasUsername: !!detail.username,
+                      hasEmail: !!detail.email,
+                      hasUrls: !!detail.urls?.length,
+                      hasNote: !!detail.note,
+                      hasTotp: detail.hasTotp,
+                      customFieldsCount: detail.customFields?.length ?? 0,
+                    },
+                    null,
+                    2,
+                  ),
+                );
+                showToast({ style: Toast.Style.Success, title: "Debug Info Copied" });
+              }}
             />
           </ActionPanel.Section>
         </ActionPanel>
@@ -338,11 +344,14 @@ export default function Command() {
             ].filter((a): a is NonNullable<typeof a> => a !== null)}
             actions={
               <ActionPanel>
-                <Action.Push
-                  title="View Details"
-                  icon={Icon.Eye}
-                  target={<ItemDetail item={item} />}
-                />
+                <ActionPanel.Section>
+                  <Action.Push
+                    title="View Details"
+                    icon={Icon.Eye}
+                    target={<ItemDetail item={item} />}
+                    shortcut={{ modifiers: ["cmd"], key: "d" }}
+                  />
+                </ActionPanel.Section>
                 <ActionPanel.Section title="Copy">
                   {item.type === "login" && (
                     <Action

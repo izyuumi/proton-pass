@@ -123,24 +123,36 @@ function ItemDetail({ item }: { item: Item }) {
               />
             )}
             {detail.username && (
-              <Action.CopyToClipboard
+              <Action
                 title="Copy Username"
-                content={detail.username}
+                icon={Icon.Person}
                 shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+                onAction={async () => {
+                  await Clipboard.copy(detail.username!);
+                  showToast({ style: Toast.Style.Success, title: "Username Copied" });
+                }}
               />
             )}
             {detail.email && (
-              <Action.CopyToClipboard
+              <Action
                 title="Copy Email"
-                content={detail.email}
+                icon={Icon.Envelope}
                 shortcut={{ modifiers: ["cmd", "opt"], key: "c" }}
+                onAction={async () => {
+                  await Clipboard.copy(detail.email!);
+                  showToast({ style: Toast.Style.Success, title: "Email Copied" });
+                }}
               />
             )}
             {detail.urls && detail.urls.length > 0 && (
-              <Action.CopyToClipboard
+              <Action
                 title="Copy First URL"
-                content={detail.urls[0]}
+                icon={Icon.Link}
                 shortcut={{ modifiers: ["cmd"], key: "u" }}
+                onAction={async () => {
+                  await Clipboard.copy(detail.urls![0]);
+                  showToast({ style: Toast.Style.Success, title: "URL Copied" });
+                }}
               />
             )}
             {detail.hasTotp && (
@@ -161,20 +173,24 @@ function ItemDetail({ item }: { item: Item }) {
               />
             )}
             {detail.note && (
-              <Action.CopyToClipboard
+              <Action
                 title="Copy Note"
-                content={detail.note}
+                icon={Icon.Document}
                 shortcut={{ modifiers: ["cmd"], key: "n" }}
+                onAction={async () => {
+                  await Clipboard.copy(detail.note!);
+                  showToast({ style: Toast.Style.Success, title: "Note Copied" });
+                }}
               />
             )}
           </ActionPanel.Section>
           {detail.customFields && detail.customFields.length > 0 && (
             <ActionPanel.Section title="Custom Fields">
               {detail.customFields.map((field, index) => (
-                <Action.CopyToClipboard
+                <Action
                   key={index}
                   title={`Copy ${field.name}`}
-                  content={field.value}
+                  icon={Icon.Clipboard}
                   shortcut={
                     index < 9
                       ? {
@@ -183,6 +199,10 @@ function ItemDetail({ item }: { item: Item }) {
                         }
                       : undefined
                   }
+                  onAction={async () => {
+                    await Clipboard.copy(field.value);
+                    showToast({ style: Toast.Style.Success, title: `${field.name} Copied` });
+                  }}
                 />
               ))}
             </ActionPanel.Section>
@@ -318,6 +338,11 @@ export default function Command() {
             ].filter((a): a is NonNullable<typeof a> => a !== null)}
             actions={
               <ActionPanel>
+                <Action.Push
+                  title="View Details"
+                  icon={Icon.Eye}
+                  target={<ItemDetail item={item} />}
+                />
                 <ActionPanel.Section title="Copy">
                   {item.type === "login" && (
                     <Action
@@ -351,17 +376,25 @@ export default function Command() {
                     />
                   )}
                   {item.username && (
-                    <Action.CopyToClipboard
+                    <Action
                       title="Copy Username"
-                      content={item.username}
+                      icon={Icon.Person}
                       shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+                      onAction={async () => {
+                        await Clipboard.copy(item.username!);
+                        showToast({ style: Toast.Style.Success, title: "Username Copied" });
+                      }}
                     />
                   )}
                   {item.email && (
-                    <Action.CopyToClipboard
+                    <Action
                       title="Copy Email"
-                      content={item.email}
+                      icon={Icon.Envelope}
                       shortcut={{ modifiers: ["cmd", "opt"], key: "c" }}
+                      onAction={async () => {
+                        await Clipboard.copy(item.email!);
+                        showToast({ style: Toast.Style.Success, title: "Email Copied" });
+                      }}
                     />
                   )}
                   {item.hasTotp && (
@@ -389,14 +422,6 @@ export default function Command() {
                       }}
                     />
                   )}
-                </ActionPanel.Section>
-                <ActionPanel.Section>
-                  <Action.Push
-                    title="View Details"
-                    icon={Icon.Eye}
-                    target={<ItemDetail item={item} />}
-                    shortcut={{ modifiers: ["cmd"], key: "d" }}
-                  />
                 </ActionPanel.Section>
               </ActionPanel>
             }

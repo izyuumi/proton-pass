@@ -1,6 +1,6 @@
 # proton-pass Changelog
 
-## [Improvements] - {PR_MERGE_DATE}
+## [Improvements] - 2026-02-23
 
 - Fix: Remove macOS quarantine attribute from auto-downloaded CLI binary so it executes correctly on first use
 - View Details is now the default action (Enter) when selecting an item

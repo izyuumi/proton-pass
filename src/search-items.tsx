@@ -8,8 +8,11 @@ import {
   Clipboard,
   getPreferenceValues,
   Detail,
+  BrowserExtension,
+  environment,
 } from "@raycast/api";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { usePromise } from "@raycast/utils";
 import { listItems, listVaults, getItem, getTotp, checkAuth } from "./lib/pass-cli";
 import { Item, ItemDetail as ItemDetailType, PassCliError, PassCliErrorType, Vault } from "./lib/types";
 import { getItemIcon, formatItemSubtitle, maskPassword } from "./lib/utils";
@@ -18,6 +21,21 @@ import { renderErrorView } from "./lib/error-views";
 
 function escapeMarkdown(value: string): string {
   return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, "\\$1");
+}
+
+function originOf(raw?: string): string | undefined {
+  if (!raw) return undefined;
+
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function matchesActiveOrigin(item: Item, activeOrigin?: string): boolean {
+  if (!activeOrigin || !item.urls || item.urls.length === 0) return false;
+  return item.urls.some((url) => originOf(url) === activeOrigin);
 }
 
 function ItemDetail({ item }: { item: Item }) {
@@ -268,7 +286,20 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ type: PassCliErrorType; message?: string } | null>(null);
   const preferences = getPreferenceValues<Preferences>();
+  const backgroundRefreshEnabled = preferences.enableBackgroundRefresh ?? true;
+  const webIntegrationEnabled = preferences.enableWebIntegration ?? true;
   const hasLoadedFromCache = useRef(false);
+  const { data: activeOrigin } = usePromise(async () => {
+    if (!webIntegrationEnabled) return undefined;
+    if (!environment.canAccess(BrowserExtension)) return undefined;
+
+    try {
+      const tabs = await BrowserExtension.getTabs();
+      return originOf(tabs.find((tab) => tab.active)?.url);
+    } catch {
+      return undefined;
+    }
+  }, [webIntegrationEnabled]);
 
   useEffect(() => {
     loadItems();
@@ -283,6 +314,10 @@ export default function Command() {
       setVaults(cachedVaults);
       setIsLoading(false);
       hasLoadedFromCache.current = true;
+
+      if (!backgroundRefreshEnabled) {
+        return;
+      }
     }
 
     try {
@@ -317,12 +352,29 @@ export default function Command() {
 
   const filteredItems =
     selectedVaultId === ALL_VAULTS_VALUE ? items : items.filter((item) => item.shareId === selectedVaultId);
+  const sortedFilteredItems = useMemo(() => {
+    if (!webIntegrationEnabled || !activeOrigin) return filteredItems;
+
+    return [...filteredItems].sort((a, b) => {
+      const aMatch = matchesActiveOrigin(a, activeOrigin);
+      const bMatch = matchesActiveOrigin(b, activeOrigin);
+      if (aMatch === bMatch) return 0;
+      return aMatch ? -1 : 1;
+    });
+  }, [activeOrigin, filteredItems, webIntegrationEnabled]);
+
+  const selectedItemId = useMemo(() => {
+    if (!webIntegrationEnabled || !activeOrigin) return undefined;
+    const match = sortedFilteredItems.find((item) => matchesActiveOrigin(item, activeOrigin));
+    return match ? `${match.shareId}-${match.itemId}` : undefined;
+  }, [activeOrigin, sortedFilteredItems, webIntegrationEnabled]);
 
   return (
     <List
       isLoading={isLoading}
       searchBarPlaceholder="Search items..."
       filtering={true}
+      selectedItemId={selectedItemId}
       searchBarAccessory={<VaultDropdown vaults={vaults} onVaultChange={setSelectedVaultId} />}
     >
       {filteredItems.length === 0 && !isLoading ? (
@@ -332,7 +384,7 @@ export default function Command() {
           description={selectedVaultId === ALL_VAULTS_VALUE ? "Your vaults are empty" : "No items in this vault"}
         />
       ) : (
-        filteredItems.map((item) => (
+        sortedFilteredItems.map((item) => (
           <List.Item
             key={`${item.shareId}-${item.itemId}`}
             icon={getItemIcon(item.type)}

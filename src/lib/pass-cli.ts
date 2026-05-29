@@ -1,4 +1,4 @@
-import { getPreferenceValues, environment } from "@raycast/api";
+import { getPreferenceValues } from "@raycast/api";
 import { execFile } from "child_process";
 import { homedir } from "os";
 import { delimiter } from "path";
@@ -12,7 +12,7 @@ import { normalizeItem, normalizeItemDetail, normalizeVault } from "./pass-cli-n
 let mockCacheCleared = false;
 
 // Seed the extension with local demo data while running `ray develop` / `npm run dev`.
-const USE_MOCK_DATA = environment.isDevelopment;
+const USE_MOCK_DATA = false;
 const DEFAULT_CLI_COMMAND = "pass-cli";
 type CliPathPreferenceValues = { cliPath?: string };
 
@@ -78,21 +78,17 @@ function getConfiguredCliPath(): string | undefined {
   return stripSurroundingQuotes(configured);
 }
 
+let resolvedCliPath: Promise<string> | undefined;
+
 async function getCliPathAsync(): Promise<string> {
-  // Check if user configured a custom path
-  const configured = getConfiguredCliPath();
-  if (configured) {
-    return configured;
-  }
-
-  // This extension is macOS-only, but keeping a non-throwing fallback here
-  // avoids hard failures when code paths are executed in non-darwin environments.
-  if (process.platform !== "darwin") {
-    return DEFAULT_CLI_COMMAND;
-  }
-
-  // Ensure CLI is installed (auto-download if needed)
-  return ensureCli();
+  if (resolvedCliPath) return resolvedCliPath;
+  resolvedCliPath = (async () => {
+    const configured = getConfiguredCliPath();
+    if (configured) return configured;
+    if (process.platform !== "darwin") return DEFAULT_CLI_COMMAND;
+    return ensureCli();
+  })();
+  return resolvedCliPath;
 }
 
 function createExecEnv(): NodeJS.ProcessEnv {
@@ -261,11 +257,12 @@ export async function listVaults(): Promise<Vault[]> {
     throw new PassCliError("Unexpected vault list output from pass-cli.", "invalid_output");
   }
 
-  return vaultsRaw.map(normalizeVault);
+  const seen = new Set<string>();
+  return vaultsRaw.map(normalizeVault).filter((v) => (seen.has(v.shareId) ? false : seen.add(v.shareId) && true));
 }
 
 async function listItemsFromVault(shareId: string, vaultName: string): Promise<Item[]> {
-  const args = ["item", "list", "--share-id", shareId, "--output", "json"];
+  const args = ["item", "list", `--share-id=${shareId}`, "--output", "json"];
 
   const output = await runCli(args);
   const data = parseJson<unknown>(output, "item list");
@@ -316,6 +313,38 @@ export async function listItems(shareId?: string): Promise<Item[]> {
   return allItems;
 }
 
+export async function listItemsStreaming(
+  onBatch: (items: Item[]) => void | Promise<void>,
+): Promise<{ vaults: Vault[]; allItems: Item[] }> {
+  if (useMockData()) {
+    await ensureMockCacheCleared();
+    await onBatch(MOCK_ITEMS);
+    return { vaults: MOCK_VAULTS, allItems: MOCK_ITEMS };
+  }
+
+  const vaults = await listVaults();
+  const allItems: Item[] = [];
+  const seenItemIds = new Set<string>();
+
+  for (const vault of vaults) {
+    try {
+      const items = await listItemsFromVault(vault.shareId, vault.name);
+      const fresh = items.filter((i) => {
+        const key = `${i.shareId}-${i.itemId}`;
+        return seenItemIds.has(key) ? false : seenItemIds.add(key) && true;
+      });
+      allItems.push(...fresh);
+      if (fresh.length > 0) await onBatch(fresh);
+    } catch (error) {
+      const errorType = error instanceof PassCliError ? error.type : "unknown";
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error(`Failed to list items from vault ${vault.name} (${errorType}): ${message}`);
+    }
+  }
+
+  return { vaults, allItems };
+}
+
 function unwrapItemResponse(data: unknown): unknown {
   if (!isRecord(data)) return data;
 
@@ -344,7 +373,7 @@ export async function getItem(shareId: string, itemId: string): Promise<ItemDeta
     throw new PassCliError("Item not found", "invalid_output");
   }
 
-  const output = await runCli(["item", "view", "--share-id", shareId, "--item-id", itemId, "--output", "json"]);
+  const output = await runCli(["item", "view", `--share-id=${shareId}`, `--item-id=${itemId}`, "--output", "json"]);
   const data = parseJson<unknown>(output, "item view");
 
   const rawItem = unwrapItemResponse(data);
@@ -352,7 +381,7 @@ export async function getItem(shareId: string, itemId: string): Promise<ItemDeta
 }
 
 export async function getTotpCodes(shareId: string, itemId: string): Promise<Record<string, string>> {
-  const output = await runCli(["item", "totp", "--share-id", shareId, "--item-id", itemId, "--output", "json"]);
+  const output = await runCli(["item", "totp", `--share-id=${shareId}`, `--item-id=${itemId}`, "--output", "json"]);
   const data = parseJson<unknown>(output, "item totp");
 
   const raw = isRecord(data) && isRecord(data.totps) ? data.totps : data;

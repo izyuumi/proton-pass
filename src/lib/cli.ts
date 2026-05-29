@@ -45,14 +45,23 @@ export function isCliInstalled(): boolean {
   return fs.existsSync(passCliFilepath());
 }
 
+let installInFlight: Promise<string> | null = null;
+
 export async function ensureCli(): Promise<string> {
   const cli = passCliFilepath();
 
   if (fs.existsSync(cli)) {
-    console.log("pass-cli already installed at:", cli);
     return cli;
   }
 
+  if (installInFlight) return installInFlight;
+  installInFlight = doInstallCli(cli).finally(() => {
+    installInFlight = null;
+  });
+  return installInFlight;
+}
+
+async function doInstallCli(cli: string): Promise<string> {
   const installToast = await showToast({
     style: Toast.Style.Animated,
     title: "Installing Proton Pass CLI",

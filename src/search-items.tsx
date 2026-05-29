@@ -7,21 +7,17 @@ import {
   Toast,
   Clipboard,
   getPreferenceValues,
-  Detail,
   BrowserExtension,
   environment,
+  Color,
 } from "@raycast/api";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePromise } from "@raycast/utils";
-import { listItems, listVaults, getItem, getTotp, checkAuth } from "./lib/pass-cli";
-import { Item, ItemDetail as ItemDetailType, PassCliError, PassCliErrorType, Vault } from "./lib/types";
-import { getItemIcon, formatItemSubtitle, maskPassword } from "./lib/utils";
+import { listItemsStreaming, getItem, getTotp } from "./lib/pass-cli";
+import { Item, PassCliError, PassCliErrorType, Vault } from "./lib/types";
+import { getItemIcon, formatItemSubtitle, getTotpRemainingSeconds, formatTotpCode } from "./lib/utils";
 import { getCachedItems, setCachedItems, getCachedVaults, setCachedVaults } from "./lib/cache";
 import { renderErrorView } from "./lib/error-views";
-
-function escapeMarkdown(value: string): string {
-  return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, "\\$1");
-}
 
 function originOf(raw?: string): string | undefined {
   if (!raw) return undefined;
@@ -36,232 +32,6 @@ function originOf(raw?: string): string | undefined {
 function matchesActiveOrigin(item: Item, activeOrigin?: string): boolean {
   if (!activeOrigin || !item.urls || item.urls.length === 0) return false;
   return item.urls.some((url) => originOf(url) === activeOrigin);
-}
-
-function ItemDetail({ item }: { item: Item }) {
-  const [detail, setDetail] = useState<ItemDetailType | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const preferences = getPreferenceValues<Preferences>();
-
-  useEffect(() => {
-    loadDetail();
-  }, []);
-
-  async function loadDetail() {
-    try {
-      const itemDetail = await getItem(item.shareId, item.itemId);
-      setDetail(itemDetail);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "An unknown error occurred";
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to load item details",
-        message,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  if (isLoading) {
-    return <Detail isLoading={true} />;
-  }
-
-  if (!detail) {
-    return <Detail markdown="Failed to load item details" />;
-  }
-
-  const markdownParts: string[] = [];
-
-  markdownParts.push(`# ${escapeMarkdown(detail.title)}\n`);
-  markdownParts.push(`**Type:** ${escapeMarkdown(detail.type)}`);
-  markdownParts.push(`**Vault:** ${escapeMarkdown(detail.vaultName)}\n`);
-
-  if (detail.username) {
-    markdownParts.push(`**Username:** ${escapeMarkdown(detail.username)}`);
-  }
-
-  if (detail.email) {
-    markdownParts.push(`**Email:** ${escapeMarkdown(detail.email)}`);
-  }
-
-  if (detail.password) {
-    markdownParts.push(`**Password:** ${escapeMarkdown(maskPassword(detail.password))}`);
-  }
-
-  if (detail.urls && detail.urls.length > 0) {
-    markdownParts.push(`\n**URLs:**`);
-    detail.urls.forEach((url) => {
-      markdownParts.push(`- ${escapeMarkdown(url)}`);
-    });
-  }
-
-  if (detail.note) {
-    markdownParts.push(`\n**Note:**\n${escapeMarkdown(detail.note)}`);
-  }
-
-  if (detail.customFields && detail.customFields.length > 0) {
-    markdownParts.push(`\n**Custom Fields:**`);
-    detail.customFields.forEach((field) => {
-      const value = field.type === "hidden" ? maskPassword(field.value) : field.value;
-      markdownParts.push(`- **${escapeMarkdown(field.name)}:** ${escapeMarkdown(value)}`);
-    });
-  }
-
-  if (detail.hasTotp) {
-    markdownParts.push(`\n**2FA:** Enabled`);
-  }
-
-  const markdown = markdownParts.join("\n");
-
-  return (
-    <Detail
-      markdown={markdown}
-      metadata={
-        <Detail.Metadata>
-          <Detail.Metadata.Label title="Type" text={detail.type} icon={getItemIcon(detail.type)} />
-          <Detail.Metadata.Label title="Vault" text={detail.vaultName} />
-          {detail.username && <Detail.Metadata.Label title="Username" text={detail.username} />}
-          {detail.email && <Detail.Metadata.Label title="Email" text={detail.email} />}
-          {detail.hasTotp && <Detail.Metadata.Label title="2FA" icon={Icon.Clock} />}
-        </Detail.Metadata>
-      }
-      actions={
-        <ActionPanel>
-          <ActionPanel.Section title="Copy">
-            {detail.password && (
-              <Action
-                title="Copy Password"
-                icon={Icon.Key}
-                shortcut={{ modifiers: ["cmd"], key: "c" }}
-                onAction={async () => {
-                  await Clipboard.copy(detail.password!, { transient: preferences.copyPasswordTransient ?? true });
-                  showToast({ style: Toast.Style.Success, title: "Password Copied" });
-                }}
-              />
-            )}
-            {detail.username && (
-              <Action
-                title="Copy Username"
-                icon={Icon.Person}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-                onAction={async () => {
-                  await Clipboard.copy(detail.username!);
-                  showToast({ style: Toast.Style.Success, title: "Username Copied" });
-                }}
-              />
-            )}
-            {detail.email && (
-              <Action
-                title="Copy Email"
-                icon={Icon.Envelope}
-                shortcut={{ modifiers: ["cmd", "opt"], key: "c" }}
-                onAction={async () => {
-                  await Clipboard.copy(detail.email!);
-                  showToast({ style: Toast.Style.Success, title: "Email Copied" });
-                }}
-              />
-            )}
-            {detail.urls && detail.urls.length > 0 && (
-              <Action
-                title="Copy First URL"
-                icon={Icon.Link}
-                shortcut={{ modifiers: ["cmd"], key: "u" }}
-                onAction={async () => {
-                  await Clipboard.copy(detail.urls![0]);
-                  showToast({ style: Toast.Style.Success, title: "URL Copied" });
-                }}
-              />
-            )}
-            {detail.hasTotp && (
-              <Action
-                title="Copy TOTP Code"
-                icon={Icon.Clock}
-                shortcut={{ modifiers: ["cmd"], key: "t" }}
-                onAction={async () => {
-                  try {
-                    const totp = await getTotp(detail.shareId, detail.itemId);
-                    await Clipboard.copy(totp, { transient: preferences.copyPasswordTransient ?? true });
-                    showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: "Clipboard updated" });
-                  } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : "An unknown error occurred";
-                    showToast({ style: Toast.Style.Failure, title: "Failed to get TOTP", message });
-                  }
-                }}
-              />
-            )}
-            {detail.note && (
-              <Action
-                title="Copy Note"
-                icon={Icon.Document}
-                shortcut={{ modifiers: ["cmd"], key: "n" }}
-                onAction={async () => {
-                  await Clipboard.copy(detail.note!);
-                  showToast({ style: Toast.Style.Success, title: "Note Copied" });
-                }}
-              />
-            )}
-          </ActionPanel.Section>
-          {detail.customFields && detail.customFields.length > 0 && (
-            <ActionPanel.Section title="Custom Fields">
-              {detail.customFields.map((field, index) => (
-                <Action
-                  key={index}
-                  title={`Copy ${field.name}`}
-                  icon={Icon.Clipboard}
-                  shortcut={
-                    index < 9
-                      ? {
-                          modifiers: ["cmd", "shift"],
-                          key: String(index + 1) as "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9",
-                        }
-                      : undefined
-                  }
-                  onAction={async () => {
-                    await Clipboard.copy(field.value);
-                    showToast({ style: Toast.Style.Success, title: `${field.name} Copied` });
-                  }}
-                />
-              ))}
-            </ActionPanel.Section>
-          )}
-          {detail.urls && detail.urls.length > 1 && (
-            <ActionPanel.Section title="URLs">
-              {detail.urls.map((url, index) => (
-                <Action.OpenInBrowser key={index} title={`Open ${url}`} url={url} />
-              ))}
-            </ActionPanel.Section>
-          )}
-          <ActionPanel.Section title="Debug">
-            <Action
-              title="Copy Item Debug Info"
-              icon={Icon.Bug}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
-              onAction={async () => {
-                await Clipboard.copy(
-                  JSON.stringify(
-                    {
-                      type: detail.type,
-                      hasPassword: !!detail.password,
-                      hasUsername: !!detail.username,
-                      hasEmail: !!detail.email,
-                      hasUrls: !!detail.urls?.length,
-                      hasNote: !!detail.note,
-                      hasTotp: detail.hasTotp,
-                      customFieldsCount: detail.customFields?.length ?? 0,
-                    },
-                    null,
-                    2,
-                  ),
-                );
-                showToast({ style: Toast.Style.Success, title: "Debug Info Copied" });
-              }}
-            />
-          </ActionPanel.Section>
-        </ActionPanel>
-      }
-    />
-  );
 }
 
 const ALL_VAULTS_VALUE = "all";
@@ -285,10 +55,16 @@ export default function Command() {
   const [selectedVaultId, setSelectedVaultId] = useState<string>(ALL_VAULTS_VALUE);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ type: PassCliErrorType; message?: string } | null>(null);
+  const [totpCodes, setTotpCodes] = useState<Record<string, string>>({});
+  const [remainingSeconds, setRemainingSeconds] = useState(getTotpRemainingSeconds());
   const preferences = getPreferenceValues<Preferences>();
   const backgroundRefreshEnabled = preferences.enableBackgroundRefresh ?? true;
   const webIntegrationEnabled = preferences.enableWebIntegration ?? true;
   const hasLoadedFromCache = useRef(false);
+  const allItemsRef = useRef<Item[]>([]);
+  const fetchedTotpIdsRef = useRef<Set<string>>(new Set());
+  const isFetchingTotpRef = useRef(false);
+  const totpTimeStepRef = useRef(Math.floor(Date.now() / 30_000));
   const { data: activeOrigin } = usePromise(
     async (isWebIntegrationEnabled: boolean) => {
       if (!isWebIntegrationEnabled) return undefined;
@@ -308,6 +84,51 @@ export default function Command() {
     loadItems();
   }, []);
 
+  useEffect(() => {
+    allItemsRef.current = items;
+    const unfetched = items.filter((i) => i.hasTotp && !fetchedTotpIdsRef.current.has(i.itemId));
+    if (unfetched.length === 0) return;
+    unfetched.forEach((i) => fetchedTotpIdsRef.current.add(i.itemId));
+    unfetched.forEach(async (item) => {
+      try {
+        const code = await getTotp(item.shareId, item.itemId);
+        setTotpCodes((prev) => ({ ...prev, [item.itemId]: code }));
+      } catch {
+        // ignore
+      }
+    });
+  }, [items]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRemainingSeconds(getTotpRemainingSeconds());
+      const nextStep = Math.floor(Date.now() / 30_000);
+      if (nextStep !== totpTimeStepRef.current) {
+        totpTimeStepRef.current = nextStep;
+        refreshTotpCodes();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function refreshTotpCodes() {
+    if (isFetchingTotpRef.current) return;
+    isFetchingTotpRef.current = true;
+    const totpItems = allItemsRef.current.filter((i) => i.hasTotp);
+    const updated: Record<string, string> = {};
+    await Promise.all(
+      totpItems.map(async (item) => {
+        try {
+          updated[item.itemId] = await getTotp(item.shareId, item.itemId);
+        } catch {
+          // ignore
+        }
+      }),
+    );
+    setTotpCodes((prev) => ({ ...prev, ...updated }));
+    isFetchingTotpRef.current = false;
+  }
+
   async function loadItems() {
     setError(null);
 
@@ -324,15 +145,15 @@ export default function Command() {
     }
 
     try {
-      const isAuth = await checkAuth();
-      if (!isAuth) {
-        setError({ type: "not_authenticated" });
-        setIsLoading(false);
-        return;
-      }
-
-      const [freshItems, freshVaults] = await Promise.all([listItems(), listVaults()]);
-      setItems(freshItems);
+      let isFirstBatch = true;
+      const { vaults: freshVaults, allItems: freshItems } = await listItemsStreaming((batch) => {
+        if (isFirstBatch) {
+          setItems(batch);
+          isFirstBatch = false;
+        } else {
+          setItems((prev) => [...prev, ...batch]);
+        }
+      });
       setVaults(freshVaults);
 
       await Promise.all([setCachedItems(freshItems), setCachedVaults(freshVaults)]);
@@ -369,6 +190,8 @@ export default function Command() {
     return match ? `${match.shareId}-${match.itemId}` : undefined;
   }, [activeOrigin, sortedFilteredItems, webIntegrationEnabled]);
 
+  const totpTimerColor = remainingSeconds > 10 ? Color.Green : remainingSeconds > 5 ? Color.Yellow : Color.Red;
+
   const errorView = renderErrorView(error?.type ?? null, loadItems, "Load Items");
   if (errorView) return errorView;
 
@@ -394,99 +217,84 @@ export default function Command() {
             title={item.title}
             subtitle={formatItemSubtitle(item)}
             accessories={[
-              item.hasTotp ? { icon: Icon.Clock, tooltip: "Has TOTP" } : null,
+              item.hasTotp
+                ? {
+                    tag: {
+                      value: totpCodes[item.itemId] ? formatTotpCode(totpCodes[item.itemId]) : "···",
+                      color: totpTimerColor,
+                    },
+                    tooltip: `${remainingSeconds}s remaining`,
+                  }
+                : null,
               { text: item.vaultName },
             ].filter((a): a is NonNullable<typeof a> => a !== null)}
             actions={
               <ActionPanel>
-                <ActionPanel.Section>
-                  <Action.Push
-                    title="View Details"
-                    icon={Icon.Eye}
-                    target={<ItemDetail item={item} />}
-                    shortcut={{ modifiers: ["cmd"], key: "d" }}
+                {item.type === "login" && (
+                  <Action
+                    title="Copy Password"
+                    icon={Icon.Key}
+                    onAction={async () => {
+                      try {
+                        const detail = await getItem(item.shareId, item.itemId);
+                        if (detail.password) {
+                          await Clipboard.copy(detail.password, {
+                            transient: preferences.copyPasswordTransient ?? true,
+                          });
+                          showToast({ style: Toast.Style.Success, title: "Password Copied" });
+                        } else {
+                          showToast({
+                            style: Toast.Style.Failure,
+                            title: "No Password Found",
+                            message: `Item type: ${detail.type}. Check if pass-cli item view returns password field.`,
+                          });
+                        }
+                      } catch (error: unknown) {
+                        const message = error instanceof Error ? error.message : "An unknown error occurred";
+                        showToast({ style: Toast.Style.Failure, title: "Failed to copy password", message });
+                      }
+                    }}
                   />
-                </ActionPanel.Section>
-                <ActionPanel.Section title="Copy">
-                  {item.type === "login" && (
-                    <Action
-                      title="Copy Password"
-                      icon={Icon.Key}
-                      shortcut={{ modifiers: ["cmd"], key: "c" }}
-                      onAction={async () => {
-                        try {
-                          const detail = await getItem(item.shareId, item.itemId);
-                          if (detail.password) {
-                            await Clipboard.copy(detail.password, {
-                              transient: preferences.copyPasswordTransient ?? true,
-                            });
-                            showToast({ style: Toast.Style.Success, title: "Password Copied" });
-                          } else {
-                            showToast({
-                              style: Toast.Style.Failure,
-                              title: "No Password Found",
-                              message: `Item type: ${detail.type}. Check if pass-cli item view returns password field.`,
-                            });
-                          }
-                        } catch (error: unknown) {
-                          const message = error instanceof Error ? error.message : "An unknown error occurred";
-                          showToast({
-                            style: Toast.Style.Failure,
-                            title: "Failed to copy password",
-                            message,
-                          });
-                        }
-                      }}
-                    />
-                  )}
-                  {item.username && (
-                    <Action
-                      title="Copy Username"
-                      icon={Icon.Person}
-                      shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-                      onAction={async () => {
-                        await Clipboard.copy(item.username!);
-                        showToast({ style: Toast.Style.Success, title: "Username Copied" });
-                      }}
-                    />
-                  )}
-                  {item.email && (
-                    <Action
-                      title="Copy Email"
-                      icon={Icon.Envelope}
-                      shortcut={{ modifiers: ["cmd", "opt"], key: "c" }}
-                      onAction={async () => {
-                        await Clipboard.copy(item.email!);
-                        showToast({ style: Toast.Style.Success, title: "Email Copied" });
-                      }}
-                    />
-                  )}
-                  {item.hasTotp && (
-                    <Action
-                      title="Copy TOTP Code"
-                      icon={Icon.Clock}
-                      shortcut={{ modifiers: ["cmd"], key: "t" }}
-                      onAction={async () => {
-                        try {
-                          const totp = await getTotp(item.shareId, item.itemId);
-                          await Clipboard.copy(totp, { transient: preferences.copyPasswordTransient ?? true });
-                          showToast({
-                            style: Toast.Style.Success,
-                            title: "TOTP Copied",
-                            message: "Clipboard updated",
-                          });
-                        } catch (error: unknown) {
-                          const message = error instanceof Error ? error.message : "An unknown error occurred";
-                          showToast({
-                            style: Toast.Style.Failure,
-                            title: "Failed to get TOTP",
-                            message,
-                          });
-                        }
-                      }}
-                    />
-                  )}
-                </ActionPanel.Section>
+                )}
+                {item.email && (
+                  <Action
+                    title="Copy Email"
+                    icon={Icon.Envelope}
+                    shortcut={{ modifiers: ["cmd"], key: "e" }}
+                    onAction={async () => {
+                      await Clipboard.copy(item.email!);
+                      showToast({ style: Toast.Style.Success, title: "Email Copied" });
+                    }}
+                  />
+                )}
+                {item.username && (
+                  <Action
+                    title="Copy Username"
+                    icon={Icon.Person}
+                    shortcut={{ modifiers: ["cmd"], key: "u" }}
+                    onAction={async () => {
+                      await Clipboard.copy(item.username!);
+                      showToast({ style: Toast.Style.Success, title: "Username Copied" });
+                    }}
+                  />
+                )}
+                {item.hasTotp && (
+                  <Action
+                    title="Copy TOTP Code"
+                    icon={Icon.Clock}
+                    shortcut={{ modifiers: ["cmd"], key: "t" }}
+                    onAction={async () => {
+                      try {
+                        const totp = await getTotp(item.shareId, item.itemId);
+                        await Clipboard.copy(totp, { transient: preferences.copyPasswordTransient ?? true });
+                        showToast({ style: Toast.Style.Success, title: "TOTP Copied", message: "Clipboard updated" });
+                      } catch (error: unknown) {
+                        const message = error instanceof Error ? error.message : "An unknown error occurred";
+                        showToast({ style: Toast.Style.Failure, title: "Failed to get TOTP", message });
+                      }
+                    }}
+                  />
+                )}
               </ActionPanel>
             }
           />

@@ -22,24 +22,10 @@
       "mode": "view"
     },
     {
-      "name": "list-vaults",
-      "title": "List Vaults",
-      "subtitle": "Proton Pass",
-      "description": "View all your Proton Pass vaults",
-      "mode": "view"
-    },
-    {
       "name": "generate-password",
       "title": "Generate Password",
       "subtitle": "Proton Pass",
       "description": "Generate secure passwords or passphrases",
-      "mode": "view"
-    },
-    {
-      "name": "get-totp",
-      "title": "Get TOTP Code",
-      "subtitle": "Proton Pass",
-      "description": "Get TOTP codes for your accounts",
       "mode": "view"
     },
     {
